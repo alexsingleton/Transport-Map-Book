@@ -5,11 +5,7 @@ library(classInt)
 library(RColorBrewer)
 library(rgeos)
 library(maptools)
-library(TeachingDemos)
-
-
-        
-        
+library(Hmisc)
 ##########
 #FUNCTIONS
 ##########
@@ -114,7 +110,7 @@ colnames(MSOA_xy) <-c("CODE","x","y")
 
 OD <- merge(OD,MSOA_xy, by.x="Area.of.workplace", by.y="CODE",all.x=TRUE)
 OD <- merge(OD,MSOA_xy, by.x="Area.of.residence", by.y="CODE",all.x=TRUE)
-colnames(OD) <- c("Workplace","Residence","All","Work_Home","Rail-light-etc","Train","Bus","Taxi","Motorcycle","Driving","Passenger","Bicycle","Foot","Other","LAD11CD_workplace","LAD11CD_residence","x_workplace","y_workplace","x_residence","y_residence")
+colnames(OD) <- c("Workplace","Residence","All","Work_Home","Rail_light_etc","Train","Bus","Taxi","Motorcycle","Driving","Passenger","Bicycle","Foot","Other","LAD11CD_workplace","LAD11CD_residence","x_workplace","y_workplace","x_residence","y_residence")
 
 
 #Read DfT LSOA Data
@@ -243,30 +239,6 @@ DfT_Out$SUPO011 <- as.numeric(as.character(DfT_Out$SUPO011))
 LSOA@data <- data.frame(LSOA@data, DfT_Out[match(LSOA@data[, "LSOA01CD"], DfT_Out[, "LSOA"]), ])#Append data to map for municipality
 
 
-#### LATEX PREP ####
-
-#COntext
-LAD_Names_Full <- unique(LAD@data)[,1:2]
-
-#Create Map lookup table
-
-map_lookup <- as.data.frame(cbind(as.character(Choro_Vars$Numerator),paste(Choro_Vars$Table_description,": ",Choro_Vars$Description," (",Choro_Vars$Numerator,")",sep='')))
-colnames(map_lookup) <- c("Variable","Description")
-f <- c("All","Work_Home","Rail-light-etc","Train","Bus","Taxi","Motorcycle","Driving","Passenger","Bicycle","Foot","Other")
-ff <- as.data.frame(cbind(f,paste("Travel to Work:",gsub("_"," ",f),"Flows")))
-colnames(ff) <- colnames(map_lookup) <- c("Variable","Description")
-map_lookup <-  rbind(map_lookup,ff)
-gg <- cbind(paste(DfT_Lookup$Variable),paste(DfT_Lookup$Description," in ",DfT_Lookup$Year," (",DfT_Lookup$Table,": ",DfT_Lookup$Variable,")",sep=''))
-colnames(gg) <- colnames(map_lookup) <- c("Variable","Description")
-map_lookup <-  rbind(map_lookup,gg)
-
-hh<- as.data.frame(cbind(c("Primary","Secondary"),c("Estimate of Average $CO^2$ grams emitted during the journey to Primary school (LSOA)","Estimate of Average $CO^2$ grams emitted during the journey to Secondary school (LSOA)")))
-colnames(hh) <- colnames(map_lookup) <- c("Variable","Description")
-map_lookup <-  rbind(map_lookup,hh)
-
-
-####
-
 
 ###############
 #Data Prep
@@ -330,4 +302,420 @@ for (n in 1:nrow(OA_maps)){
 OA_ZONE@data <- data.frame(OA_ZONE@data, OA_out[match(OA_ZONE@data[, "CODE"], OA_out[, "OA_CODE"]), ])#Append data to map for municipality
 
 
+
+
+###############
+#Create Maps
+###############
+
+#Create list of LAD
+LAD_LIST <- unique(OA_Lookup$LAD11CD)
+LAD_LIST <- LAD_LIST[substr(LAD_LIST,1,1) == "E" & LAD_LIST != "E09000001"]
+var_LIST <- c("All","Rail_light_etc","Train","Bus","Taxi","Motorcycle","Driving","Passenger","Bicycle","Foot")
+
+LAD_LIST<- LAD_LIST[sample(1:length(LAD_LIST), 5)]
+
+for (i in 1:length(LAD_LIST)){#Start LAD Map Loop
+  
+  LAD_plot <- as.character(LAD_LIST[i])#Get LAD
+  
+  ############################
+  #Flow Maps
+  ############################
+
+  for (v in 1:length(var_LIST)){#Start Mode Loop
+
+    
+    var_plot <- as.character(var_LIST[v])#Get Mode
+
+    #Limit flow data to manageable size
+      LAD_flow <- subset(OD,LAD11CD_workplace == LAD_plot & LAD11CD_residence == LAD_plot)#Extract LAD
+      LAD_flow <- LAD_flow[as.character(LAD_flow$Workplace) != as.character(LAD_flow$Residence),]#Remove internal flow
+      LAD_flow <- LAD_flow[order(-LAD_flow[,paste(var_plot)]),]#Order
+      LAD_flow <- LAD_flow[1:(min(c(60,nrow(LAD_flow)))),]#Limit top 60 flows
+      LAD_flow <- LAD_flow[order(LAD_flow[,paste(var_plot)]),]#Order plot small to large
+    
+         if (length(unique(LAD_flow[,paste(var_plot)])) >5){    #check if worth mapping
+
+
+        colint <- classIntervals(LAD_flow[,paste(var_plot)], 5, style = "jenks")$brks #Get breaks
+        width <- c(0.3,0.5,1,2,4) #Assign line widths
+        colours <- brewer.pal(5, "YlOrBr")#Flows
+
+
+#Create Map
+pdf(paste("./Map_out/","FL_",LAD_plot,"_",var_plot,".pdf",sep=''))
+plot(LAD[LAD@data$CODE == LAD_plot,],col="#003333",lwd=0.05)#Background
+plot(MSOA[MSOA@data$LAD11CD == LAD_plot,], border = "#2b5555", lwd=0.5,add=TRUE)#MSOA Borders
+for (x in 1:nrow(LAD_flow)){
+    segments(LAD_flow[x,"x_workplace"],  LAD_flow[x,"y_workplace"],	LAD_flow[x,"x_residence"],	LAD_flow[x,"y_residence"],lwd=width[findInterval(LAD_flow[x,var_plot], colint,all.inside=TRUE)], col=colours[findInterval(LAD_flow[x,var_plot], colint,all.inside=TRUE)])
+}
+#Plotting region dimensions
+rng <- par("usr")
+#Call legend
+lg <- legend(rng[1],rng[3],legend=c(leglabs(colint),"MSOA"), col=c(colours,"#2b5555"),lty=c(1,1,1,1,1,NA),lwd=c(0.3,0.5,1,2,4,NA), fill=c(NA,NA,NA,NA,NA,"#003333"),border=c(NA,NA,NA,NA,NA,"#2b5555"),text.col = "#FFFFFF",bg="#003333",merge = TRUE,cex=.4,horiz=TRUE,plot=FALSE)
+
+#Set appropriate legend values for selected breaks 
+  lty <- c(1,1,1,1,1,NA)
+  lwd <- c(0.3,0.5,1,2,4,NA)
+  fill <- c(NA,NA,NA,NA,NA,"#003333")
+  border <- c(NA,NA,NA,NA,NA,"#2b5555")
+  legend <- c(leglabs(colint),"MSOA")
+
+#Adjust legend plot position
+legend(rng[1]+(((rng[2]-rng[1])/2)-(lg$rect$w/2)),rng[3]+ (lg$rect$h*0.6),legend=legend, col=c(colours,"#2b5555"),lty=lty,lwd=lwd, fill=fill,border=border,text.col = "#FFFFFF",bg="#003333",merge = TRUE,cex=.4,horiz=TRUE,plot=TRUE,xpd = NA)
+dev.off()
+system(paste("pdfcrop '",paste(getwd(),"/Map_out/","FL_",LAD_plot,"_",var_plot,".pdf",sep=''),"' '",paste("/Users/alex/Map_out/","FL_",LAD_plot,"_",var_plot,".pdf",sep=''),"'",sep=""),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+
+rm(colint,width,colours,rng,lg)
+}#End check if worth mapping
+}#End Mode Loop
+rm(LAD_flow,var_plot)
+
+############################ End Flow Map ############################
+
+
+
+
+
+############################
+#WZ Maps
+############################
+
+plot_vars_WZ <- colnames(wz_out)[-1]
+my_colours <- brewer.pal(5, "YlOrRd")
+
+for (i in 1:length(plot_vars_WZ)) {
+  
+  pdf(paste("./Map_out/","WZ_",LAD_plot,"_",gsub("_PCT","",plot_vars_WZ[i]),".pdf",sep=''))
+  
+  tmp_plot_vars <- WZ@data[WZ@data$LAD11CD == LAD_plot,plot_vars_WZ[i]]
+  
+  if (length(unique(tmp_plot_vars)) >5){
+  
+  breaks <- classIntervals(tmp_plot_vars, 5, style = "jenks")$brks #Get breaks
+  
+  plot(WZ[WZ@data$LAD11CD == LAD_plot,], col = my_colours[findInterval(tmp_plot_vars, breaks, all.inside = TRUE)], axes = FALSE, border = NA)
+  plot(WARD[WARD@data$LAD11CD == LAD_plot,],border="#707070",add=TRUE)
+  
+  
+  #A loop to check that ward labels are appropriate
+  ig_lab <- c("E06000052","E07000031","E07000165","E07000168","E09000001","E06000054","E06000048")
+  
+  #Add on text labels for the wards
+  if (!LAD_plot %in% ig_lab){
+    pointLabel(coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,1],coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,2],labels=WARD@data[WARD@data$LAD11CD == LAD_plot,"NAME"], cex=.5)
+  }
+  
+  #Plotting region dimensions
+  rng <- par("usr")
+  #Call legend
+  lg <- legend(rng[1],rng[3], legend = leglabs(round(breaks, digits = 1), between = " to "), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA,horiz=TRUE,box.lty=0,cex=.4,plot=FALSE)
+
+  #Adjust legend plot position
+  legend(rng[1]+(((rng[2]-rng[1])/2)-(lg$rect$w/2)),rng[3]+ (lg$rect$h*0.1), legend = paste(leglabs(round(breaks, digits = 1), between = " to "),"%",sep=''), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA ,horiz=TRUE,box.lty=0,xpd = NA,cex=.4)
+dev.off()
+system(paste("pdfcrop '",paste(getwd(),"/Map_out/","WZ_",LAD_plot,"_",gsub("_PCT","",plot_vars_WZ[i]),".pdf",sep=''),"' '",paste("/Users/alex/Map_out/","WZ_",LAD_plot,"_",gsub("_PCT","",plot_vars_WZ[i]),".pdf",sep=''),"'",sep=""),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+
+rm(breaks,rng,lg)
+}#Check if worth plotting
+rm(tmp_plot_vars)
+}
+
+
+################################################################################################################
+
+############################
+#OA Maps
+############################
+
+
+plot_vars_OA <- colnames(OA_out)[-1]
+my_colours <- brewer.pal(5, "Blues")
+
+for (i in 1:length(plot_vars_OA)) {
+  
+  pdf(paste("./Map_out/","OA_",LAD_plot,"_",gsub("_PCT","",plot_vars_OA[i]),".pdf",sep=''))
+  
+  tmp_plot_vars <- OA_ZONE@data[OA_ZONE@data$LAD11CD == LAD_plot,plot_vars_OA[i]]
+  
+  if (length(unique(tmp_plot_vars)) >5){
+  
+  breaks <- classIntervals(tmp_plot_vars, 5, style = "jenks")$brks #Get breaks
+  
+  plot(OA_ZONE[OA_ZONE@data$LAD11CD == LAD_plot,], col = my_colours[findInterval(tmp_plot_vars, breaks, all.inside = TRUE)], axes = FALSE, border = NA)
+  plot(WARD[WARD@data$LAD11CD == LAD_plot,],border="#707070",add=TRUE)
+  
+  
+  #A loop to check that ward labels are appropriate
+  ig_lab <- c("E06000052","E07000031","E07000165","E07000168","E09000001","E06000054","E06000048")
+  
+  #Add on text labels for the wards
+  if (!LAD_plot %in% ig_lab){
+    pointLabel(coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,1],coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,2],labels=WARD@data[WARD@data$LAD11CD == LAD_plot,"NAME"], cex=.5)
+  }
+  
+  #Plotting region dimensions
+  rng <- par("usr")
+  #Call legend
+  lg <- legend(rng[1],rng[3], legend = leglabs(round(breaks, digits = 1), between = " to "), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA,horiz=TRUE,box.lty=0,cex=.4,plot=FALSE)
+  
+  #Adjust legend plot position
+  legend(rng[1]+(((rng[2]-rng[1])/2)-(lg$rect$w/2)),rng[3]+ (lg$rect$h*0.1), legend = paste(leglabs(round(breaks, digits = 1), between = " to "),"%",sep=''), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA ,horiz=TRUE,box.lty=0,xpd = NA,cex=.4)
+  dev.off()
+  system(paste("pdfcrop '",paste(getwd(),"/Map_out/","OA_",LAD_plot,"_",gsub("_PCT","",plot_vars_OA[i]),".pdf",sep=''),"' '",paste("/Users/alex/Map_out/","OA_",LAD_plot,"_",gsub("_PCT","",plot_vars_OA[i]),".pdf",sep=''),"'",sep=""),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+  rm(breaks,rng,lg)
+  }#Check if worth plotting
+  rm(tmp_plot_vars)
+}
+
+
+
+################################################################################################################
+
+############################
+#LSOA Maps
+############################
+
+
+plot_vars_LSOA <- colnames(LSOA@data)[4:length(colnames(LSOA@data))]
+my_colours <- brewer.pal(5, "Greens")
+
+for (i in 1:length(plot_vars_LSOA)) {
+  
+  
+  tmp_plot_vars <- LSOA@data[LSOA@data$LAD11CD == LAD_plot,plot_vars_LSOA[i]]
+ 
+  if (length(unique(tmp_plot_vars)) >5){
+  
+  breaks <- classIntervals(tmp_plot_vars, 5, style = "jenks")$brks #Get breaks
+    
+  pdf(paste("./Map_out/","LSOA_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''))
+  
+  plot(LSOA[LSOA@data$LAD11CD == LAD_plot,], col = "#b7c3d0", axes = FALSE, border = NA)
+  plot(LSOA[LSOA@data$LAD11CD == LAD_plot,], col = my_colours[findInterval(tmp_plot_vars, breaks, all.inside = TRUE)], axes = FALSE, border = NA,add=TRUE)
+  plot(WARD[WARD@data$LAD11CD == LAD_plot,],border="#707070",add=TRUE)
+  
+  
+  #A loop to check that ward labels are appropriate
+  ig_lab <- c("E06000052","E07000031","E07000165","E07000168","E09000001","E06000054","E06000048")
+  
+  #Add on text labels for the wards
+  if (!LAD_plot %in% ig_lab){
+    pointLabel(coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,1],coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,2],labels=WARD@data[WARD@data$LAD11CD == LAD_plot,"NAME"], cex=.5)
+  }
+  
+  #Plotting region dimensions
+  rng <- par("usr")
+  #Call legend
+  lg <- legend(rng[1],rng[3], legend = leglabs(round(breaks, digits = 1), between = " to "), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA,horiz=TRUE,box.lty=0,cex=.4,plot=FALSE)
+  
+  #Adjust legend plot position
+  legend(rng[1]+(((rng[2]-rng[1])/2)-(lg$rect$w/2)),rng[3]+ (lg$rect$h*0.1), legend = paste(leglabs(round(breaks, digits = 1), between = " to "),"min.",sep=''), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA ,horiz=TRUE,box.lty=0,xpd = NA,cex=.4)
+  dev.off()
+  system(paste("pdfcrop '",paste(getwd(),"/Map_out/","LSOA_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''),"' '",paste("/Users/alex/Map_out/","LSOA_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''),"'",sep=""),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+  rm(breaks,rng,lg)
+  }#Check if worth plotting
+  rm(tmp_plot_vars)
+}
+
+
+
+
+############################
+#LSOA CO2 Maps
+############################
+
+
+plot_vars_LSOA <- colnames(LSOA_CO2@data)[c(2,3)]
+my_colours <- brewer.pal(5, "RdPu")
+
+for (i in 1:length(plot_vars_LSOA)) {
+  
+  tmp_plot_vars <- LSOA_CO2@data[LSOA_CO2@data$LAD11CD == LAD_plot,plot_vars_LSOA[i]]
+  
+  if (length(unique(tmp_plot_vars)) >5){
+    
+    breaks <- classIntervals(tmp_plot_vars, 5, style = "jenks")$brks #Get breaks
+    
+    pdf(paste("./Map_out/","LSOACO2_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''))
+    
+    plot(LSOA_CO2[LSOA_CO2@data$LAD11CD == LAD_plot,], col = "#b7c3d0", axes = FALSE, border = NA)
+    plot(LSOA_CO2[LSOA_CO2@data$LAD11CD == LAD_plot,], col = my_colours[findInterval(tmp_plot_vars, breaks, all.inside = TRUE)], axes = FALSE, border = NA,add=TRUE)
+    plot(WARD[WARD@data$LAD11CD == LAD_plot,],border="#707070",add=TRUE)
+    
+    
+    #A loop to check that ward labels are appropriate
+    ig_lab <- c("E06000052","E07000031","E07000165","E07000168","E09000001","E06000054","E06000048")
+    
+    #Add on text labels for the wards
+    if (!LAD_plot %in% ig_lab){
+      pointLabel(coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,1],coordinates(WARD[WARD@data$LAD11CD == LAD_plot,])[,2],labels=WARD@data[WARD@data$LAD11CD == LAD_plot,"NAME"], cex=.5)
+    }
+    
+    #Plotting region dimensions
+    rng <- par("usr")
+    #Call legend
+    lg <- legend(rng[1],rng[3], legend = leglabs(round(breaks, digits = 1), between = " to "), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA,horiz=TRUE,box.lty=0,cex=.4,plot=FALSE)
+    
+    #Adjust legend plot position
+    legend(rng[1]+(((rng[2]-rng[1])/2)-(lg$rect$w/2)),rng[3]+ (lg$rect$h*0.1), legend = paste(leglabs(round(breaks, digits = 1), between = " to ")," g",sep=''), fill = my_colours, bty = "o", ,bg="#FFFFFF", border = NA ,horiz=TRUE,box.lty=0,xpd = NA,cex=.4)
+    dev.off()
+    system(paste("pdfcrop '",paste(getwd(),"/Map_out/","LSOACO2_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''),"' '",paste("/Users/alex/Map_out/","LSOACO2_",LAD_plot,"_",plot_vars_LSOA[i],".pdf",sep=''),"'",sep=""),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+    rm(breaks,rng,lg)
+  }#Check if worth plotting
+  rm(tmp_plot_vars)
+}
+
+
+
+
+
+
+#########################
+# Latex
+#########################
+
+#COntext
+LAD_Names_Full <- unique(LAD@data)[,1:2]
+
+#Create Map lookup table
+
+map_lookup <- as.data.frame(cbind(as.character(Choro_Vars$Numerator),paste(Choro_Vars$Table_description,": ",Choro_Vars$Description," (",Choro_Vars$Numerator,")",sep='')))
+colnames(map_lookup) <- c("Variable","Description")
+f <- c("All","Work_Home","Rail_light_etc","Train","Bus","Taxi","Motorcycle","Driving","Passenger","Bicycle","Foot","Other")
+ff <- as.data.frame(cbind(f,paste("Travel to Work:",gsub("_"," ",f),"Flows")))
+colnames(ff) <- colnames(map_lookup) <- c("Variable","Description")
+map_lookup <-  rbind(map_lookup,ff)
+gg <- cbind(paste(DfT_Lookup$Variable),paste(DfT_Lookup$Description," in ",DfT_Lookup$Year," (",DfT_Lookup$Table,": ",DfT_Lookup$Variable,")",sep=''))
+colnames(gg) <- colnames(map_lookup) <- c("Variable","Description")
+map_lookup <-  rbind(map_lookup,gg)
+
+hh<- as.data.frame(cbind(c("Primary","Secondary"),c("Estimate of Average CO^2 grams emitted during the journey to Primary school (LSOA)","Estimate of Average CO^2 grams emitted during the journey to Secondary school (LSOA)")))
+colnames(hh) <- colnames(map_lookup) <- c("Variable","Description")
+map_lookup <-  rbind(map_lookup,hh)
+
+#Create Maps...
+
+#Create a list of the maps, and a table - variable lookup
+maps_list <- list.files(path="./Map_Out/")
+maps_list <- gsub(".pdf","",maps_list)
+maps_list <- gsub("PCT","",maps_list)
+maps_list <- strsplit(maps_list,"_")
+maps_list <- data.frame(matrix(unlist(maps_list), nrow=length(maps_list), byrow=T))
+colnames(maps_list) <- c("Type","Table","Variable")
+maps_list$Scale <- as.character(maps_list$Type)
+maps_list$Scale[maps_list$Type == "FL"] <- "MSOA"
+
+
+
+  
+  LAD_Name_No_Non_Char <- LAD_Names_Full[LAD_Names_Full$CODE == LAD_plot,"NAME"]
+  LAD_Name_No_Non_Char <- gsub("'","",LAD_Name_No_Non_Char, fixed = TRUE)
+  LAD_Name_No_Non_Char <- gsub(",","",LAD_Name_No_Non_Char, fixed = TRUE)
+  LAD_Name_No_Non_Char <- gsub(".","",LAD_Name_No_Non_Char, fixed = TRUE)
+    
+    #Create a LAD tex file
+    file.create(paste(getwd(),"/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".tex",sep=''))
+    #Open tex file for edits
+    fileConn<-file((paste(getwd(),"/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".tex",sep='')))
+    
+    #Get the name of the LAD
+    LAD_name <- LAD_Names_Full[LAD_Names_Full$CODE == LAD_plot,"NAME"]
+    
+    #Create the header
+    header <- paste("\\documentclass[a4paper,10pt]{article}
+                    \\pagenumbering{gobble}
+                    \\makeatletter
+                    \\renewcommand{\\@dotsep}{10000} 
+                    \\makeatother
+                    \\usepackage{helvet}
+                    \\renewcommand{\\familydefault}{\\sfdefault}
+                    \\setlength{\\textwidth}{13cm}
+                    \\setlength{\\oddsidemargin}{2.5cm}
+                    \\setlength{\\evensidemargin}{2.5cm}
+                    \\setlength{\\topmargin}{1cm}
+                    \\title{",paste("Transport Map Book (",gsub("'","\\'",LAD_name)," / ", LAD_plot,")",sep=''),"}
+                    \\author{Alex D Singleton}
+                    \\usepackage[hidelinks]{hyperref}
+                    \\usepackage{needspace}
+                    \\usepackage{float}
+                    \\usepackage[pdftex]{graphicx}
+                    \\usepackage[margin=2cm]{geometry}
+                    \\usepackage{subfigure}
+                    \\usepackage{caption}
+                    \\usepackage{graphicx}
+                    \\needspace{.25\\textheight}
+                    \\begin{document}
+                    \\maketitle
+                    \\phantomsection
+                    \\label{listfigs}
+                    \\listoffigures
+                    \\clearpage
+                    \\graphicspath{{",paste(getwd(),"/Map_Out/",sep=''),"}}",sep="")
+    
+  
+  #Setup Figure List
+  fig_list <- NULL
+  
+    
+  for (z in 1:nrow(maps_list)){#ATLAS loop
+  
+      map_id <- paste(maps_list[z,1],"_",maps_list[z,2],"_",maps_list[z,3],sep="")#create the map id
+      caption <- paste(as.character(map_lookup[map_lookup$Variable == as.character(maps_list[z,3]),"Description"])," (",maps_list[z,4],")",sep='')
+      variable_id <- as.character(maps_list[z,3])
+      
+      assign("content_temp",paste(" 
+                                  \\begin{minipage}{\\textwidth}
+                                  \\begin{figure}[H]
+                                  \\centering
+                                  \\hyperref[listfigs]{\\includegraphics[width=15cm,height=20cm,keepaspectratio]{",map_id,".pdf}}
+                                  \\caption{", caption,"}
+                                  \\end{figure}
+                                                          
+                                  \\noindent \\tiny Variable ID -- ",variable_id,".  \\\\  Contains National Statistics data \\copyright{}  Crown copyright and database right 2014. \\\\ 
+                                  Contains Ordnance Survey data \\copyright{}  Crown copyright and database right 2014.  \\\\  Map created by Alex Singleton www.alex-singleton.com.
+                                  \\end{minipage}",sep=""))
+      
+      
+      fig_list <- c(fig_list,content_temp)
+      
+      
+      rm(map_id,caption,variable_id)
+      
+      
+    }#End atlas loop  
+    
+    #Adds content to the tex file
+    
+    footer <- "\\end{document}"
+    
+    content <- as.character(fig_list)
+    
+    writeLines(c(header,content,footer), fileConn)
+    close(fileConn)
+
+
+#Create LaTex document
+system(paste("pdflatex '",getwd(),"/",paste(LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".tex'",sep=''),sep=''),wait=FALSE,ignore.stdout = FALSE, ignore.stderr = FALSE)
+system(paste("pdflatex '",getwd(),"/",paste(LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".tex'",sep=''),sep=''),wait=TRUE,ignore.stdout = TRUE, ignore.stderr = TRUE)
+
+cover_location <- "/Users/alex/Google Drive/Projects/Transport_MapBook/Cover.pdf"
+atlas_location <- paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".pdf'",sep='')
+final_atlas_location <- paste("/Users/alex/Google Drive/Projects/Transport_MapBook/Mapbooks/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".pdf'",sep='')
+
+  
+  #Cleanup
+  system(paste("pdftk ","'",cover_location,"' '",atlas_location," cat output '",final_atlas_location,sep=''),wait = TRUE)#Add Cover
+
+file.remove(paste("",getwd(),"/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".tex",sep=''))#Remove Latex File
+file.remove(paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".aux",sep=''))#Remove tmp files
+file.remove(paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".lof",sep=''))#Remove tmp files
+file.remove(paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".log",sep=''))#Remove tmp files
+file.remove(paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".out",sep=''))#Remove tmp files
+file.remove(paste("/Users/alex/",LAD_plot,"_",gsub(" ","_",LAD_Name_No_Non_Char),".pdf",sep=''))#Remove tmp files
+system(paste("find ",paste("'",getwd(),"/Map_Out/'",sep='')," -name '*.pdf' -delete",sep=''),wait = TRUE)#Remove maps
+
+rm(LAD_plot)
+}#End LAD Map Loop
 
